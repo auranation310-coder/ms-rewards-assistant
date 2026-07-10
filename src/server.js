@@ -91,24 +91,25 @@ app.post('/api/downloader/analyze', async (req, res) => {
     if (platform === 'youtube') {
       const info = await ytdl.getInfo(url);
       
-      // Filter formats that have both audio and video (muxed stream) for direct downloading without ffmpeg
-      const formats = ytdl.filterFormats(info.formats, 'audioandvideo').map(f => ({
-        quality: f.qualityLabel || 'Default',
-        itag: f.itag,
-        mimeType: f.mimeType.split(';')[0],
-        container: f.container
-      }));
+      // Grab all formats that contain video
+      const videoFormats = info.formats.filter(f => f.hasVideo);
 
-      if (formats.length === 0) {
-        // Fallback to video-only if no audioandvideo formats are found
-        const videoOnly = info.formats.filter(f => f.hasVideo).map(f => ({
-          quality: f.qualityLabel || 'Default (Video Only)',
+      const formats = videoFormats.map(f => {
+        const resolution = f.qualityLabel || 'Default';
+        const hasAudio = f.hasAudio;
+        const container = f.container || 'mp4';
+        
+        return {
+          quality: `${resolution} ${hasAudio ? '(With Sound)' : '(HD - Audio Merged)'}`,
           itag: f.itag,
           mimeType: f.mimeType.split(';')[0],
-          container: f.container
-        }));
-        formats.push(...videoOnly);
-      }
+          container,
+          resolution: f.height || 0
+        };
+      });
+
+      // Sort formats by resolution (height) in descending order
+      formats.sort((a, b) => b.resolution - a.resolution);
 
       const durationSec = parseInt(info.videoDetails.lengthSeconds, 10);
       const minutes = Math.floor(durationSec / 60);
@@ -121,15 +122,12 @@ app.post('/api/downloader/analyze', async (req, res) => {
         formats
       });
     } else if (platform === 'instagram') {
-      // Use Playwright to load page and extract video URL dynamically
       console.log('Launching browser to scrape Instagram reel...');
       const browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
       
       try {
         await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-        
-        // Wait for video tag
         await page.waitForSelector('video', { timeout: 10000 });
         
         const data = await page.evaluate(() => {
@@ -176,14 +174,51 @@ app.get('/api/downloader/download', async (req, res) => {
   try {
     if (platform === 'youtube') {
       const info = await ytdl.getInfo(url);
+      const format = info.formats.find(f => f.itag == itag);
       const title = info.videoDetails.title.replace(/[^a-zA-Z0-9]/g, '_');
       
+      // If muxed format (has both audio and video), pipe directly
+      if (format.hasAudio && format.hasVideo) {
+        res.setHeader('Content-Disposition', `attachment; filename="${title}.mp4"`);
+        res.setHeader('Content-Type', 'video/mp4');
+        ytdl(url, { format: itag }).pipe(res);
+        return;
+      }
+
+      // If video-only adaptive format (e.g. 1080p, 4K), merge it with highestaudio
+      console.log(`Piping high-quality video (itag ${itag}) and merging with audio...`);
       res.setHeader('Content-Disposition', `attachment; filename="${title}.mp4"`);
       res.setHeader('Content-Type', 'video/mp4');
-      
-      ytdl(url, { format: itag }).pipe(res);
+
+      const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
+      const videoUrl = format.url;
+      const audioUrl = audioFormat.url;
+
+      // Spawn FFmpeg and stream directly to response
+      const ffmpegProcess = spawn('ffmpeg', [
+        '-loglevel', 'error',
+        '-i', videoUrl,
+        '-i', audioUrl,
+        '-map', '0:v:0',
+        '-map', '1:a:0',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-f', 'mp4',
+        '-movflags', 'frag_keyframe+empty_moov',
+        'pipe:1'
+      ]);
+
+      ffmpegProcess.stdout.pipe(res);
+
+      ffmpegProcess.stderr.on('data', (data) => {
+        console.error(`ffmpeg stderr: ${data.toString()}`);
+      });
+
+      req.on('close', () => {
+        console.log('Client cancelled download. Killing FFmpeg process...');
+        ffmpegProcess.kill();
+      });
     } else if (platform === 'instagram') {
-      // Direct redirect to Instagram CDN so the client downloads directly from source
       res.redirect(url);
     } else {
       res.status(400).send('Unsupported platform');
