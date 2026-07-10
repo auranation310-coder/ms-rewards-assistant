@@ -34,6 +34,12 @@
               <span class="label">Video Downloader</span>
             </button>
           </li>
+          <li>
+            <button class="nav-btn" id="nav-loot">
+              <span class="icon">🎁</span>
+              <span class="label">Loot Updates</span>
+            </button>
+          </li>
         </ul>
       </nav>
       <div class="sidebar-footer">
@@ -182,6 +188,27 @@
                 <span class="btn-text">Download Video</span>
               </button>
             </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Loot Updates View (Hidden by default) -->
+      <div class="loot-view hidden" id="loot-content">
+        <section class="loot-panel glass">
+          <div class="loot-header">
+            <h2 class="section-title">🎁 Loot & Deal Updates</h2>
+            <button class="btn btn-secondary" id="btn-refresh-loot">
+              <span class="btn-icon">🔄</span>
+              <span class="btn-text">Refresh Deals</span>
+            </button>
+          </div>
+          <p class="loot-subtitle">Showing live alerts from Telegram channel: <a href="https://t.me/subho9239" target="_blank" style="color: var(--color-blue); text-decoration: none;">@subho9239</a></p>
+          
+          <div class="loot-status" id="loot-status"></div>
+
+          <!-- Feed list -->
+          <div class="loot-feed" id="loot-feed-container">
+            <div class="empty-state">No updates loaded. Click Refresh to load.</div>
           </div>
         </section>
       </div>

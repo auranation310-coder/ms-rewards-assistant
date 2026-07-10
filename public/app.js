@@ -4,8 +4,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements - General
   const navMsRewards = document.getElementById('nav-ms-rewards');
   const navDownloader = document.getElementById('nav-downloader');
+  const navLoot = document.getElementById('nav-loot');
   const dashboardContent = document.getElementById('dashboard-content');
   const downloaderContent = document.getElementById('downloader-content');
+  const lootContent = document.getElementById('loot-content');
 
   // DOM Elements - MS Rewards
   const btnRefresh = document.getElementById('btn-refresh-status');
@@ -33,6 +35,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const qualitySelect = document.getElementById('quality-select');
   const btnDownload = document.getElementById('btn-download');
 
+  // DOM Elements - Loot
+  const btnRefreshLoot = document.getElementById('btn-refresh-loot');
+  const lootStatus = document.getElementById('loot-status');
+  const lootFeedContainer = document.getElementById('loot-feed-container');
+
   // State Variables
   let currentPlatform = 'youtube';
   let analyzedUrl = '';
@@ -42,16 +49,30 @@ document.addEventListener('DOMContentLoaded', () => {
   navMsRewards.addEventListener('click', () => {
     navMsRewards.classList.add('active');
     navDownloader.classList.remove('active');
+    navLoot.classList.remove('active');
     dashboardContent.classList.remove('hidden');
     downloaderContent.classList.add('hidden');
+    lootContent.classList.add('hidden');
     fetchStatus();
   });
 
   navDownloader.addEventListener('click', () => {
     navDownloader.classList.add('active');
     navMsRewards.classList.remove('active');
+    navLoot.classList.remove('active');
     downloaderContent.classList.remove('hidden');
     dashboardContent.classList.add('hidden');
+    lootContent.classList.add('hidden');
+  });
+
+  navLoot.addEventListener('click', () => {
+    navLoot.classList.add('active');
+    navMsRewards.classList.remove('active');
+    navDownloader.classList.remove('active');
+    lootContent.classList.remove('hidden');
+    dashboardContent.classList.add('hidden');
+    downloaderContent.classList.add('hidden');
+    fetchLoot();
   });
 
   // Downloader Tab Switcher
@@ -365,9 +386,54 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
+  // Action: Get Telegram Loot Updates
+  async function fetchLoot() {
+    btnRefreshLoot.disabled = true;
+    lootStatus.innerText = 'Fetching latest loot alerts from Telegram...';
+    lootStatus.className = 'loot-status';
+
+    try {
+      const response = await fetch('/api/loot/updates');
+      if (!response.ok) {
+        throw new Error('Failed to fetch channel updates');
+      }
+
+      const data = await response.json();
+      lootFeedContainer.innerHTML = '';
+
+      if (data.messages && data.messages.length > 0) {
+        data.messages.forEach(msg => {
+          const card = document.createElement('div');
+          card.className = 'loot-card';
+
+          card.innerHTML = `
+            <div class="loot-card-meta">
+              <span class="loot-card-date">📅 ${msg.date}</span>
+              ${msg.link ? `<a href="${msg.link}" target="_blank" style="color: var(--color-blue); text-decoration: none; font-size: 11px;">View Original Post ➔</a>` : ''}
+            </div>
+            ${msg.image ? `<img src="${msg.image}" class="loot-card-img" alt="Loot Image" />` : ''}
+            <div class="loot-card-text">${msg.text}</div>
+          `;
+          lootFeedContainer.appendChild(card);
+        });
+        lootStatus.innerText = 'Loot alerts loaded successfully.';
+        lootStatus.className = 'loot-status success';
+      } else {
+        lootFeedContainer.innerHTML = '<div class="empty-state">No updates found in the channel.</div>';
+        lootStatus.innerText = 'No messages found.';
+      }
+    } catch (err) {
+      lootStatus.innerText = `Error: ${err.message}`;
+      lootStatus.className = 'loot-status error';
+    } finally {
+      btnRefreshLoot.disabled = false;
+    }
+  }
+
   // Bind Listeners
   btnRefresh.addEventListener('click', fetchStatus);
   btnStart.addEventListener('click', startAssistant);
+  btnRefreshLoot.addEventListener('click', fetchLoot);
 
   // Auto-fetch status on initial load
   fetchStatus();
