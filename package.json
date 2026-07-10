@@ -1,0 +1,18 @@
+{
+  "name": "ms-rewards-assistant",
+  "version": "1.0.0",
+  "description": "Microsoft Rewards Assistant",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "login": "node src/login.js",
+    "dry-run": "node src/index.js --dry-run",
+    "start-visible": "node src/index.js --visible",
+    "telegram-bot": "node src/bot.js",
+    "verify": "node src/self-correct.js"
+  },
+  "dependencies": {
+    "playwright": "^1.49.1"
+  }
+}

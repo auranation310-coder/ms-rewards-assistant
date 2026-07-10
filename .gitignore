@@ -1,0 +1,17 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Local configuration and credentials (DO NOT COMMIT)
+config.json
+user_data/
+verify_result.json
+
+# Log files and screenshots
+*.log
+*.png
+*.txt
+
+# OS metadata
+.DS_Store
+Thumbs.db
