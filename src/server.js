@@ -3,15 +3,37 @@ import { spawn } from 'child_process';
 import { chromium } from 'playwright';
 import path from 'path';
 import fs from 'fs';
-import ytdl from '@distube/ytdl-core';
 import { getDashboardStatus } from './dashboard.js';
 
 const app = express();
 const port = 8080;
 const userDataDir = path.resolve('./user_data');
+const ytdlpPath = path.resolve('yt-dlp.exe');
 
 app.use(express.static('public'));
 app.use(express.json());
+
+// Helper: Query yt-dlp metadata using spawn to prevent buffer overflows
+const getYtDlpInfo = (url) => new Promise((resolve, reject) => {
+  const child = spawn(ytdlpPath, ['-J', url]);
+  let stdout = '';
+  let stderr = '';
+  
+  child.stdout.on('data', data => stdout += data);
+  child.stderr.on('data', data => stderr += data);
+  
+  child.on('close', (code) => {
+    if (code === 0) {
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (err) {
+        reject(new Error('Failed to parse yt-dlp metadata JSON'));
+      }
+    } else {
+      reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`));
+    }
+  });
+});
 
 // API: Get current status
 app.get('/api/status', async (req, res) => {
@@ -89,45 +111,58 @@ app.post('/api/downloader/analyze', async (req, res) => {
 
   try {
     if (platform === 'youtube') {
-      const info = await ytdl.getInfo(url);
+      const info = await getYtDlpInfo(url);
       
-      // Grab all formats that contain video
-      const videoFormats = info.formats.filter(f => f.hasVideo);
+      // Get best audio size to add to video-only sizes
+      const audioFormats = info.formats.filter(f => f.vcodec === 'none' && f.acodec !== 'none');
+      audioFormats.sort((a, b) => (b.abr || 0) - (a.abr || 0));
+      const bestAudio = audioFormats[0];
+      const audioSize = bestAudio ? (bestAudio.filesize || bestAudio.filesize_approx || 0) : 0;
 
-      const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
-      const audioSize = audioFormat ? parseInt(audioFormat.contentLength || 0, 10) : 0;
+      // Filter formats containing video
+      const videoFormats = info.formats.filter(f => f.vcodec !== 'none');
 
       const formats = videoFormats.map(f => {
-        const resolution = f.qualityLabel || 'Default';
-        const hasAudio = f.hasAudio;
-        const container = f.container || 'mp4';
+        const resolution = f.format_note || `${f.height}p`;
+        const hasAudio = f.acodec !== 'none';
+        const container = f.ext || 'mp4';
         
-        // Calculate total size: video + audio (if separate)
-        const videoSize = parseInt(f.contentLength || 0, 10);
+        const videoSize = f.filesize || f.filesize_approx || 0;
         const totalSize = hasAudio ? videoSize : (videoSize > 0 ? videoSize + audioSize : 0);
 
         return {
           quality: `${resolution} ${hasAudio ? '(With Sound)' : '(HD - Audio Merged)'}`,
-          itag: f.itag,
-          mimeType: f.mimeType.split(';')[0],
+          itag: f.format_id,
+          mimeType: f.vcodec,
           container,
           resolution: f.height || 0,
           sizeBytes: totalSize
         };
       });
 
-      // Sort formats by resolution (height) in descending order
-      formats.sort((a, b) => b.resolution - a.resolution);
+      // Filter duplicates by resolution and audio status
+      const uniqueFormats = [];
+      const seen = new Set();
+      formats.forEach(f => {
+        const key = `${f.resolution}_${f.quality.includes('With Sound')}`;
+        if (!seen.has(key) && f.resolution > 0) {
+          seen.add(key);
+          uniqueFormats.push(f);
+        }
+      });
 
-      const durationSec = parseInt(info.videoDetails.lengthSeconds, 10);
+      // Sort formats by resolution in descending order
+      uniqueFormats.sort((a, b) => b.resolution - a.resolution);
+
+      const durationSec = parseInt(info.duration || 0, 10);
       const minutes = Math.floor(durationSec / 60);
       const seconds = durationSec % 60;
 
       res.json({
-        title: info.videoDetails.title,
-        thumbnail: info.videoDetails.thumbnails[0]?.url,
+        title: info.title,
+        thumbnail: info.thumbnail,
         duration: `${minutes}m ${seconds}s`,
-        formats
+        formats: uniqueFormats
       });
     } else if (platform === 'instagram') {
       console.log('Launching browser to scrape Instagram reel...');
@@ -180,78 +215,39 @@ app.get('/api/downloader/download', async (req, res) => {
   console.log(`API Request: /api/downloader/download (Platform: ${platform})`);
 
   try {
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
     if (platform === 'youtube') {
-      const info = await ytdl.getInfo(url);
-      const format = info.formats.find(f => f.itag == itag);
-      const title = info.videoDetails.title.replace(/[^a-zA-Z0-9]/g, '_');
+      const info = await getYtDlpInfo(url);
+      const title = info.title.replace(/[^a-zA-Z0-9]/g, '_');
       
-      // If muxed format (has both audio and video), pipe directly
-      if (format.hasAudio && format.hasVideo) {
-        res.setHeader('Content-Disposition', `attachment; filename="${title}.mp4"`);
-        res.setHeader('Content-Type', 'video/mp4');
-        ytdl(url, { format: itag }).pipe(res);
-        return;
-      }
-
-      // For adaptive (HD/4K video only), download temporarily and merge
-      console.log('Downloading adaptive streams to temp files...');
       const tempDir = path.resolve('./temp');
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir);
       }
 
-      const videoTemp = path.join(tempDir, `v_${itag}_${Date.now()}.mp4`);
-      const audioTemp = path.join(tempDir, `a_${itag}_${Date.now()}.mp3`);
       const mergedOut = path.join(tempDir, `m_${itag}_${Date.now()}.mp4`);
-
-      const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
-
-      console.log('Fetching video track...');
-      const videoStream = ytdl(url, { format: itag });
-      const videoWriter = fs.createWriteStream(videoTemp);
-      videoStream.pipe(videoWriter);
-
-      console.log('Fetching audio track...');
-      const audioStream = ytdl(url, { format: audioFormat.itag });
-      const audioWriter = fs.createWriteStream(audioTemp);
-      audioStream.pipe(audioWriter);
-
-      // Wait for both downloads to finish
-      await Promise.all([
-        new Promise((resolve, reject) => {
-          videoWriter.on('finish', resolve);
-          videoWriter.on('error', reject);
-        }),
-        new Promise((resolve, reject) => {
-          audioWriter.on('finish', resolve);
-          audioWriter.on('error', reject);
-        })
-      ]);
-
-      console.log('Merging streams with FFmpeg...');
-      const ffmpegProcess = spawn('ffmpeg', [
-        '-y',
-        '-i', videoTemp,
-        '-i', audioTemp,
-        '-c:v', 'copy',
-        '-c:a', 'aac',
-        mergedOut
+      
+      console.log(`Running yt-dlp download for format ${itag}...`);
+      
+      // Spawn yt-dlp to download selected video format and merge with best audio
+      const ytDlpProcess = spawn(ytdlpPath, [
+        '-f', `${itag}+bestaudio/best`,
+        '--merge-output-format', 'mp4',
+        url,
+        '-o', mergedOut
       ]);
 
       await new Promise((resolve, reject) => {
-        ffmpegProcess.on('close', (code) => {
+        ytDlpProcess.on('close', (code) => {
           if (code === 0) resolve();
-          else reject(new Error(`FFmpeg exited with code ${code}`));
+          else reject(new Error(`yt-dlp download exited with code ${code}`));
         });
-        ffmpegProcess.on('error', reject);
+        ytDlpProcess.on('error', reject);
       });
 
       console.log('Sending merged file to client...');
       res.download(mergedOut, `${title}.mp4`, (err) => {
-        // Clean up temp files
         try {
-          if (fs.existsSync(videoTemp)) fs.unlinkSync(videoTemp);
-          if (fs.existsSync(audioTemp)) fs.unlinkSync(audioTemp);
           if (fs.existsSync(mergedOut)) fs.unlinkSync(mergedOut);
           console.log('Temporary files cleaned up successfully.');
         } catch (cleanupErr) {
