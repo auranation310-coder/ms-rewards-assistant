@@ -13,6 +13,22 @@ const ytdlpPath = path.resolve('yt-dlp.exe');
 app.use(express.static('public'));
 app.use(express.json());
 
+// Global state for active downloads
+const activeDownloads = new Map();
+
+function updateProgress(id, percent, status, filePath = '') {
+  const download = activeDownloads.get(id);
+  if (!download) return;
+  download.percent = percent;
+  download.status = status;
+  if (filePath) download.filePath = filePath;
+  
+  // Notify all SSE listeners
+  download.listeners.forEach(res => {
+    res.write(`data: ${JSON.stringify({ percent, status })}\n\n`);
+  });
+}
+
 // Helper: Query yt-dlp metadata using spawn to prevent buffer overflows
 const getYtDlpInfo = (url) => new Promise((resolve, reject) => {
   const child = spawn(ytdlpPath, ['-J', url]);
@@ -209,61 +225,146 @@ app.post('/api/downloader/analyze', async (req, res) => {
   }
 });
 
-// API: Downloader - Download Stream / Redirect
-app.get('/api/downloader/download', async (req, res) => {
-  const { platform, url, itag } = req.query;
-  console.log(`API Request: /api/downloader/download (Platform: ${platform})`);
+// API: Downloader - Start Download Process
+app.post('/api/downloader/start-download', async (req, res) => {
+  const { platform, url, itag } = req.body;
+  console.log(`API Request: /api/downloader/start-download (Platform: ${platform})`);
 
   try {
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
-    if (platform === 'youtube') {
-      const info = await getYtDlpInfo(url);
-      const title = info.title.replace(/[^a-zA-Z0-9]/g, '_');
-      
-      const tempDir = path.resolve('./temp');
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir);
-      }
+    if (platform === 'instagram') {
+      // Instagram is a direct redirect link, no background task needed
+      res.json({ status: 'redirect', url: `/api/downloader/file?platform=instagram&url=${encodeURIComponent(url)}` });
+      return;
+    }
 
-      const mergedOut = path.join(tempDir, `m_${itag}_${Date.now()}.mp4`);
-      
-      console.log(`Running yt-dlp download for format ${itag}...`);
-      
-      // Spawn yt-dlp to download selected video format and merge with best audio
-      const ytDlpProcess = spawn(ytdlpPath, [
-        '-f', `${itag}+bestaudio/best`,
-        '--merge-output-format', 'mp4',
-        url,
-        '-o', mergedOut
-      ]);
+    const info = await getYtDlpInfo(url);
+    const title = info.title.replace(/[^a-zA-Z0-9]/g, '_');
+    
+    const downloadId = 'dl_' + Date.now();
+    
+    // Initialize active download structure
+    activeDownloads.set(downloadId, {
+      percent: 0,
+      status: 'downloading',
+      filePath: '',
+      listeners: []
+    });
 
-      await new Promise((resolve, reject) => {
-        ytDlpProcess.on('close', (code) => {
-          if (code === 0) resolve();
-          else reject(new Error(`yt-dlp download exited with code ${code}`));
-        });
-        ytDlpProcess.on('error', reject);
-      });
+    res.json({ status: 'started', downloadId });
 
-      console.log('Sending merged file to client...');
-      res.download(mergedOut, `${title}.mp4`, (err) => {
-        try {
-          if (fs.existsSync(mergedOut)) fs.unlinkSync(mergedOut);
-          console.log('Temporary files cleaned up successfully.');
-        } catch (cleanupErr) {
-          console.error('Failed to clean up temp files:', cleanupErr.message);
+    // Execute yt-dlp in the background
+    const tempDir = path.resolve('./temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir);
+    }
+    const mergedOut = path.join(tempDir, `m_${itag}_${Date.now()}_${title}.mp4`);
+
+    console.log(`[${downloadId}] Starting background download for format ${itag}...`);
+
+    const ytDlpProcess = spawn(ytdlpPath, [
+      '-f', `${itag}+bestaudio/best`,
+      '--merge-output-format', 'mp4',
+      url,
+      '-o', mergedOut
+    ]);
+
+    ytDlpProcess.stdout.on('data', (data) => {
+      const lines = data.toString().split('\n');
+      lines.forEach(line => {
+        // Parse download percentage from yt-dlp (e.g. "[download]  23.4% of...")
+        const match = /\[download\]\s+(\d+(?:\.\d+)?)%/.exec(line);
+        if (match) {
+          const percent = parseFloat(match[1]);
+          updateProgress(downloadId, percent, 'downloading');
+        }
+        if (line.includes('[Merger]') || line.includes('Merging formats')) {
+          updateProgress(downloadId, 100, 'merging');
         }
       });
+    });
 
-    } else if (platform === 'instagram') {
-      res.redirect(url);
-    } else {
-      res.status(400).send('Unsupported platform');
-    }
+    ytDlpProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log(`[${downloadId}] Download completed and merged successfully.`);
+        updateProgress(downloadId, 100, 'finished', mergedOut);
+      } else {
+        console.error(`[${downloadId}] Download failed with exit code ${code}`);
+        updateProgress(downloadId, 0, 'error');
+      }
+    });
+
+    ytDlpProcess.on('error', (err) => {
+      console.error(`[${downloadId}] Download process crashed:`, err.message);
+      updateProgress(downloadId, 0, 'error');
+    });
+
   } catch (error) {
-    console.error('Download trigger failed:', error.message);
-    res.status(500).send(`Download failed: ${error.message}`);
+    console.error('Failed to initiate download:', error.message);
+    res.status(500).json({ error: error.message });
   }
+});
+
+// API: Downloader - Progress Stream (SSE)
+app.get('/api/downloader/progress', (req, res) => {
+  const { id } = req.query;
+  const download = activeDownloads.get(id);
+  
+  if (!download) {
+    res.status(404).end();
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  // Add client to listeners
+  download.listeners.push(res);
+
+  // Send initial state immediately
+  res.write(`data: ${JSON.stringify({ percent: download.percent, status: download.status })}\n\n`);
+
+  req.on('close', () => {
+    const d = activeDownloads.get(id);
+    if (d) {
+      d.listeners = d.listeners.filter(l => l !== res);
+    }
+  });
+});
+
+// API: Downloader - Fetch compiled File (or trigger instagram redirects)
+app.get('/api/downloader/file', (req, res) => {
+  const { id, platform, url } = req.query;
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+
+  if (platform === 'instagram') {
+    console.log('Redirecting client to Instagram source...');
+    res.redirect(url);
+    return;
+  }
+
+  const download = activeDownloads.get(id);
+  if (!download || download.status !== 'finished') {
+    res.status(400).send('File is not ready or has expired.');
+    return;
+  }
+
+  console.log(`Serving file for download ID ${id}...`);
+  const originalTitle = path.basename(download.filePath).replace(/^m_\w+_\d+_\d+__?/, '');
+
+  res.download(download.filePath, originalTitle, (err) => {
+    // Delete temp file after transfer completes
+    try {
+      if (fs.existsSync(download.filePath)) {
+        fs.unlinkSync(download.filePath);
+      }
+      activeDownloads.delete(id);
+      console.log(`Cleaned up temporary download ID ${id}`);
+    } catch (cleanupErr) {
+      console.error('Failed to clean up temp file:', cleanupErr.message);
+    }
+  });
 });
 
 app.listen(port, () => {

@@ -176,42 +176,73 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnDownload.disabled = true;
     const originalText = btnDownload.innerHTML;
-    btnDownload.innerHTML = `<span class="btn-icon">⏳</span> <span class="btn-text">Downloading & Merging (Please wait...)</span>`;
+    btnDownload.innerHTML = `<span class="btn-icon">⏳</span> <span class="btn-text">Initializing...</span>`;
     
     try {
-      if (currentPlatform === 'youtube') {
-        const response = await fetch(`/api/downloader/download?platform=youtube&url=${encodeURIComponent(analyzedUrl)}&itag=${selectedVal}`);
-        if (!response.ok) {
-          throw new Error('Failed to download video stream');
-        }
-        
-        const blob = await response.blob();
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        
-        // Read filename from Content-Disposition header
-        const contentDisposition = response.headers.get('Content-Disposition');
-        let filename = 'video.mp4';
-        if (contentDisposition) {
-          const match = contentDisposition.match(/filename="(.+)"/);
-          if (match) {
-            filename = match[1];
-          }
-        }
-        
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(downloadUrl);
-      } else {
-        // Instagram direct redirect download
-        window.location.href = `/api/downloader/download?platform=instagram&url=${encodeURIComponent(selectedVal)}`;
+      // 1. Call backend to start the background download
+      const response = await fetch('/api/downloader/start-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platform: currentPlatform,
+          url: analyzedUrl,
+          itag: selectedVal
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to initialize download.');
       }
+
+      const data = await response.json();
+
+      if (data.status === 'redirect') {
+        // Direct redirect for Instagram
+        window.location.href = data.url;
+        btnDownload.disabled = false;
+        btnDownload.innerHTML = originalText;
+        return;
+      }
+
+      // 2. Open EventSource for YouTube download progress
+      const downloadId = data.downloadId;
+      const eventSource = new EventSource(`/api/downloader/progress?id=${downloadId}`);
+
+      eventSource.onmessage = (event) => {
+        const update = JSON.parse(event.data);
+        
+        if (update.status === 'downloading') {
+          btnDownload.innerHTML = `<span class="btn-icon">📥</span> <span class="btn-text">Downloading: ${update.percent}%</span>`;
+        } else if (update.status === 'merging') {
+          btnDownload.innerHTML = `<span class="btn-icon">⚙️</span> <span class="btn-text">Merging Tracks...</span>`;
+        } else if (update.status === 'finished') {
+          eventSource.close();
+          btnDownload.innerHTML = `<span class="btn-icon">✅</span> <span class="btn-text">Finalizing...</span>`;
+          
+          // Trigger actual file download in browser
+          window.location.href = `/api/downloader/file?id=${downloadId}`;
+          
+          // Restore button state
+          setTimeout(() => {
+            btnDownload.disabled = false;
+            btnDownload.innerHTML = originalText;
+          }, 2000);
+        } else if (update.status === 'error') {
+          eventSource.close();
+          btnDownload.disabled = false;
+          btnDownload.innerHTML = originalText;
+          alert('Download task failed on the server.');
+        }
+      };
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        btnDownload.disabled = false;
+        btnDownload.innerHTML = originalText;
+      };
+
     } catch (err) {
       alert('Download failed: ' + err.message);
-    } finally {
       btnDownload.disabled = false;
       btnDownload.innerHTML = originalText;
     }
