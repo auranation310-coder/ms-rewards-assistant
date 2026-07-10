@@ -1,8 +1,9 @@
 import express from 'express';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
 import { chromium } from 'playwright';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import * as cheerio from 'cheerio';
 import { getDashboardStatus } from './dashboard.js';
 
@@ -424,6 +425,105 @@ app.get('/api/loot/updates', async (req, res) => {
     res.json({ messages: latestMessages });
   } catch (error) {
     console.error('Loot updates fetch failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: PC Health - Retrieve system specs, storage, and CPU thermal zone status
+app.get('/api/health/stats', async (req, res) => {
+  console.log('API Request: /api/health/stats');
+  
+  const runPowerShell = (cmd) => new Promise((resolve) => {
+    exec(cmd, { shell: 'powershell.exe' }, (error, stdout, stderr) => {
+      if (error) {
+        resolve(null);
+      } else {
+        try {
+          resolve(JSON.parse(stdout));
+        } catch (err) {
+          // If not valid JSON, return as string
+          resolve(stdout.trim());
+        }
+      }
+    });
+  });
+
+  try {
+    // 1. Fetch drives
+    const diskData = await runPowerShell('Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | Select-Object DeviceID, Size, FreeSpace | ConvertTo-Json -Compress');
+    
+    // 2. Fetch CPU
+    const cpuData = await runPowerShell('Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores | ConvertTo-Json -Compress');
+    
+    // 3. Fetch OS
+    const osData = await runPowerShell('Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, OSArchitecture | ConvertTo-Json -Compress');
+    
+    // 4. Fetch Temperature (requires admin, returns null/empty if blocked)
+    const tempData = await runPowerShell('Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | Select-Object CurrentTemperature | ConvertTo-Json -Compress');
+
+    // Format CPU Name
+    let cpuName = 'Unknown Processor';
+    let cpuCores = 'N/A';
+    if (cpuData) {
+      const cpuObj = Array.isArray(cpuData) ? cpuData[0] : cpuData;
+      cpuName = cpuObj.Name || cpuName;
+      cpuCores = cpuObj.NumberOfCores ? `${cpuObj.NumberOfCores} Cores` : cpuCores;
+    }
+
+    // Format OS Name
+    let osName = 'Windows OS';
+    if (osData) {
+      const osObj = Array.isArray(osData) ? osData[0] : osData;
+      osName = `${osObj.Caption || 'Windows'} (${osObj.OSArchitecture || '64-bit'})`;
+    }
+
+    // Format CPU Temperature
+    let temperature = 'N/A';
+    if (tempData) {
+      const tempK = Array.isArray(tempData) ? tempData[0]?.CurrentTemperature : tempData.CurrentTemperature;
+      if (tempK) {
+        // Kelvin to Celsius conversion
+        const tempC = (tempK / 10) - 273.15;
+        temperature = `${tempC.toFixed(1)}°C`;
+      }
+    }
+
+    // Format Uptime
+    const uptimeSec = os.uptime();
+    const days = Math.floor(uptimeSec / (3600 * 24));
+    const hours = Math.floor((uptimeSec % (3600 * 24)) / 3600);
+    const mins = Math.floor((uptimeSec % 3600) / 60);
+    const uptimeStr = `${days}d ${hours}h ${mins}m`;
+
+    // RAM stats
+    const totalRam = os.totalmem();
+    const freeRam = os.freemem();
+
+    // Map disks cleanly
+    let disks = [];
+    if (diskData) {
+      const list = Array.isArray(diskData) ? diskData : [diskData];
+      disks = list.map(d => ({
+        drive: d.DeviceID,
+        sizeBytes: d.Size,
+        freeBytes: d.FreeSpace
+      }));
+    }
+
+    res.json({
+      os: osName,
+      cpu: cpuName,
+      cores: cpuCores,
+      uptime: uptimeStr,
+      temp: temperature,
+      ram: {
+        total: totalRam,
+        free: freeRam
+      },
+      disks
+    });
+  } catch (error) {
+    console.error('Failed to retrieve health stats:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

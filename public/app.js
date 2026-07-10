@@ -5,9 +5,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const navMsRewards = document.getElementById('nav-ms-rewards');
   const navDownloader = document.getElementById('nav-downloader');
   const navLoot = document.getElementById('nav-loot');
+  const navHealth = document.getElementById('nav-health');
+  
   const dashboardContent = document.getElementById('dashboard-content');
   const downloaderContent = document.getElementById('downloader-content');
   const lootContent = document.getElementById('loot-content');
+  const healthContent = document.getElementById('health-content');
 
   // DOM Elements - MS Rewards
   const btnRefresh = document.getElementById('btn-refresh-status');
@@ -40,39 +43,62 @@ document.addEventListener('DOMContentLoaded', () => {
   const lootStatus = document.getElementById('loot-status');
   const lootFeedContainer = document.getElementById('loot-feed-container');
 
+  // DOM Elements - PC Health
+  const btnRefreshHealth = document.getElementById('btn-refresh-health');
+  const healthStatus = document.getElementById('health-status');
+  const specOs = document.getElementById('spec-os');
+  const specCpu = document.getElementById('spec-cpu');
+  const specCores = document.getElementById('spec-cores');
+  const specRam = document.getElementById('spec-ram');
+  const ramProgressFill = document.getElementById('ram-progress-fill');
+  const specUptime = document.getElementById('spec-uptime');
+  const specTemp = document.getElementById('spec-temp');
+  const drivesListContainer = document.getElementById('drives-list-container');
+
   // State Variables
   let currentPlatform = 'youtube';
   let analyzedUrl = '';
   let analyzedData = null;
 
-  // View Switcher Logic
-  navMsRewards.addEventListener('click', () => {
-    navMsRewards.classList.add('active');
+  // Function to deactivate all tabs and hide all views
+  function hideAllViews() {
+    navMsRewards.classList.remove('active');
     navDownloader.classList.remove('active');
     navLoot.classList.remove('active');
-    dashboardContent.classList.remove('hidden');
+    navHealth.classList.remove('active');
+
+    dashboardContent.classList.add('hidden');
     downloaderContent.classList.add('hidden');
     lootContent.classList.add('hidden');
+    healthContent.classList.add('hidden');
+  }
+
+  // View Switcher Logic
+  navMsRewards.addEventListener('click', () => {
+    hideAllViews();
+    navMsRewards.classList.add('active');
+    dashboardContent.classList.remove('hidden');
     fetchStatus();
   });
 
   navDownloader.addEventListener('click', () => {
+    hideAllViews();
     navDownloader.classList.add('active');
-    navMsRewards.classList.remove('active');
-    navLoot.classList.remove('active');
     downloaderContent.classList.remove('hidden');
-    dashboardContent.classList.add('hidden');
-    lootContent.classList.add('hidden');
   });
 
   navLoot.addEventListener('click', () => {
+    hideAllViews();
     navLoot.classList.add('active');
-    navMsRewards.classList.remove('active');
-    navDownloader.classList.remove('active');
     lootContent.classList.remove('hidden');
-    dashboardContent.classList.add('hidden');
-    downloaderContent.classList.add('hidden');
     fetchLoot();
+  });
+
+  navHealth.addEventListener('click', () => {
+    hideAllViews();
+    navHealth.classList.add('active');
+    healthContent.classList.remove('hidden');
+    fetchHealth();
   });
 
   // Downloader Tab Switcher
@@ -430,10 +456,96 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Action: Get PC Health and Specifications
+  async function fetchHealth() {
+    btnRefreshHealth.disabled = true;
+    healthStatus.innerText = 'Analyzing system specifications and drive states...';
+    healthStatus.className = 'health-status';
+
+    try {
+      const response = await fetch('/api/health/stats');
+      if (!response.ok) {
+        throw new Error('Failed to fetch PC health data');
+      }
+
+      const data = await response.json();
+      
+      // Update Specs Panel
+      specOs.innerText = data.os;
+      specCpu.innerText = data.cpu;
+      specCores.innerText = data.cores;
+      specUptime.innerText = data.uptime;
+      
+      // Handle Temperature Display
+      if (data.temp === 'N/A') {
+        specTemp.innerHTML = '<span style="font-size: 13px; font-weight: normal; color: var(--text-muted);">N/A (Run server as Admin to query temp)</span>';
+      } else {
+        specTemp.innerText = data.temp;
+      }
+
+      // Calculate RAM
+      const totalRamGB = (data.ram.total / (1024 ** 3)).toFixed(1);
+      const freeRamGB = (data.ram.free / (1024 ** 3)).toFixed(1);
+      const usedRamGB = (totalRamGB - freeRamGB).toFixed(1);
+      const ramUsedPercent = Math.round((usedRamGB / totalRamGB) * 100);
+
+      specRam.innerText = `${usedRamGB} GB Used / ${totalRamGB} GB Total (${ramUsedPercent}%)`;
+      ramProgressFill.style.width = `${ramUsedPercent}%`;
+
+      // Update Storage Partition Panel
+      drivesListContainer.innerHTML = '';
+      if (data.disks && data.disks.length > 0) {
+        data.disks.forEach(d => {
+          const totalGB = (d.sizeBytes / (1024 ** 3)).toFixed(1);
+          const freeGB = (d.freeBytes / (1024 ** 3)).toFixed(1);
+          const usedGB = (totalGB - freeGB).toFixed(1);
+          const usedPercent = Math.round((usedGB / totalGB) * 100);
+
+          // Select warn color style depending on fill size
+          let colorClass = '';
+          if (usedPercent >= 90) {
+            colorClass = 'danger';
+          } else if (usedPercent >= 75) {
+            colorClass = 'warning';
+          }
+
+          const card = document.createElement('div');
+          card.className = 'drive-card';
+          card.innerHTML = `
+            <div class="drive-card-header">
+              <span class="drive-letter">💾 Drive ${d.drive}</span>
+              <span class="drive-usage-text">${usedPercent}% Used</span>
+            </div>
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill drive-progress-fill ${colorClass}" style="width: ${usedPercent}%"></div>
+            </div>
+            <div class="drive-card-footer">
+              <span>Used: ${usedGB} GB</span>
+              <span>Free: ${freeGB} GB</span>
+              <span>Total: ${totalGB} GB</span>
+            </div>
+          `;
+          drivesListContainer.appendChild(card);
+        });
+      } else {
+        drivesListContainer.innerHTML = '<div class="empty-state">No local drives detected.</div>';
+      }
+
+      healthStatus.innerText = 'System specifications loaded successfully.';
+      healthStatus.className = 'health-status success';
+    } catch (err) {
+      healthStatus.innerText = `Error: ${err.message}`;
+      healthStatus.className = 'health-status error';
+    } finally {
+      btnRefreshHealth.disabled = false;
+    }
+  }
+
   // Bind Listeners
   btnRefresh.addEventListener('click', fetchStatus);
   btnStart.addEventListener('click', startAssistant);
   btnRefreshLoot.addEventListener('click', fetchLoot);
+  btnRefreshHealth.addEventListener('click', fetchHealth);
 
   // Auto-fetch status on initial load
   fetchStatus();

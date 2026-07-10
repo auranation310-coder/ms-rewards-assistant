@@ -40,6 +40,12 @@
               <span class="label">Loot Updates</span>
             </button>
           </li>
+          <li>
+            <button class="nav-btn" id="nav-health">
+              <span class="icon">💻</span>
+              <span class="label">PC Health</span>
+            </button>
+          </li>
         </ul>
       </nav>
       <div class="sidebar-footer">
@@ -209,6 +215,67 @@
           <!-- Feed list -->
           <div class="loot-feed" id="loot-feed-container">
             <div class="empty-state">No updates loaded. Click Refresh to load.</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- PC Health View (Hidden by default) -->
+      <div class="health-view hidden" id="health-content">
+        <section class="health-panel glass">
+          <div class="health-header">
+            <h2 class="section-title">💻 PC Health & Specifications</h2>
+            <button class="btn btn-secondary" id="btn-refresh-health">
+              <span class="btn-icon">🔄</span>
+              <span class="btn-text">Refresh Stats</span>
+            </button>
+          </div>
+          
+          <div class="health-status" id="health-status"></div>
+
+          <div class="detail-split">
+            <!-- Left Column: Specs & Temperature -->
+            <div class="specs-column glass-dark">
+              <h3 class="subsection-title">System Specifications</h3>
+              <div class="spec-list">
+                <div class="spec-item">
+                  <span class="spec-label">Operating System</span>
+                  <span class="spec-value" id="spec-os">---</span>
+                </div>
+                <div class="spec-item">
+                  <span class="spec-label">Processor</span>
+                  <span class="spec-value" id="spec-cpu">---</span>
+                </div>
+                <div class="spec-item">
+                  <span class="spec-label">CPU Cores</span>
+                  <span class="spec-value" id="spec-cores">---</span>
+                </div>
+                <div class="spec-item">
+                  <span class="spec-label">Memory (RAM)</span>
+                  <div class="ram-usage-box">
+                    <span class="spec-value" id="spec-ram">---</span>
+                    <div class="progress-bar-container">
+                      <div class="progress-bar-fill" id="ram-progress-fill" style="width: 0%"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="spec-item">
+                  <span class="spec-label">System Uptime</span>
+                  <span class="spec-value" id="spec-uptime">---</span>
+                </div>
+                <div class="spec-item temp-spec">
+                  <span class="spec-label">CPU Temperature</span>
+                  <span class="spec-value" id="spec-temp">---</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Column: Storage Drives -->
+            <div class="storage-column glass-dark">
+              <h3 class="subsection-title">Storage & Partition Health</h3>
+              <div class="drives-list" id="drives-list-container">
+                <div class="empty-state">No storage data loaded.</div>
+              </div>
+            </div>
           </div>
         </section>
       </div>
