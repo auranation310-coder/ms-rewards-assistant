@@ -57,7 +57,7 @@ app.get('/api/start', (req, res) => {
     const lines = data.toString().split('\n');
     lines.forEach(line => {
       if (line.trim()) {
-        res.write(`data: ${line}\n\n`);
+        res.write('data: ' + line + '\n\n');
       }
     });
   });
@@ -66,13 +66,13 @@ app.get('/api/start', (req, res) => {
     const lines = data.toString().split('\n');
     lines.forEach(line => {
       if (line.trim()) {
-        res.write(`data: [ERROR] ${line}\n\n`);
+        res.write('data: [ERROR] ' + line + '\n\n');
       }
     });
   });
 
   child.on('close', (code) => {
-    res.write(`data: [FINISHED] Execution completed with code ${code}\n\n`);
+    res.write('data: [FINISHED] Execution completed with code ' + code + '\n\n');
     res.end();
   });
 
@@ -185,39 +185,72 @@ app.get('/api/downloader/download', async (req, res) => {
         return;
       }
 
-      // If video-only adaptive format (e.g. 1080p, 4K), merge it with highestaudio
-      console.log(`Piping high-quality video (itag ${itag}) and merging with audio...`);
-      res.setHeader('Content-Disposition', `attachment; filename="${title}.mp4"`);
-      res.setHeader('Content-Type', 'video/mp4');
+      // For adaptive (HD/4K video only), download temporarily and merge
+      console.log('Downloading adaptive streams to temp files...');
+      const tempDir = path.resolve('./temp');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir);
+      }
+
+      const videoTemp = path.join(tempDir, `v_${itag}_${Date.now()}.mp4`);
+      const audioTemp = path.join(tempDir, `a_${itag}_${Date.now()}.mp3`);
+      const mergedOut = path.join(tempDir, `m_${itag}_${Date.now()}.mp4`);
 
       const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
-      const videoUrl = format.url;
-      const audioUrl = audioFormat.url;
 
-      // Spawn FFmpeg and stream directly to response
-      const ffmpegProcess = spawn('ffmpeg', [
-        '-loglevel', 'error',
-        '-i', videoUrl,
-        '-i', audioUrl,
-        '-map', '0:v:0',
-        '-map', '1:a:0',
-        '-c:v', 'copy',
-        '-c:a', 'aac',
-        '-f', 'mp4',
-        '-movflags', 'frag_keyframe+empty_moov',
-        'pipe:1'
+      console.log('Fetching video track...');
+      const videoStream = ytdl(url, { format: itag });
+      const videoWriter = fs.createWriteStream(videoTemp);
+      videoStream.pipe(videoWriter);
+
+      console.log('Fetching audio track...');
+      const audioStream = ytdl(url, { format: audioFormat.itag });
+      const audioWriter = fs.createWriteStream(audioTemp);
+      audioStream.pipe(audioWriter);
+
+      // Wait for both downloads to finish
+      await Promise.all([
+        new Promise((resolve, reject) => {
+          videoWriter.on('finish', resolve);
+          videoWriter.on('error', reject);
+        }),
+        new Promise((resolve, reject) => {
+          audioWriter.on('finish', resolve);
+          audioWriter.on('error', reject);
+        })
       ]);
 
-      ffmpegProcess.stdout.pipe(res);
+      console.log('Merging streams with FFmpeg...');
+      const ffmpegProcess = spawn('ffmpeg', [
+        '-y',
+        '-i', videoTemp,
+        '-i', audioTemp,
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        mergedOut
+      ]);
 
-      ffmpegProcess.stderr.on('data', (data) => {
-        console.error(`ffmpeg stderr: ${data.toString()}`);
+      await new Promise((resolve, reject) => {
+        ffmpegProcess.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`FFmpeg exited with code ${code}`));
+        });
+        ffmpegProcess.on('error', reject);
       });
 
-      req.on('close', () => {
-        console.log('Client cancelled download. Killing FFmpeg process...');
-        ffmpegProcess.kill();
+      console.log('Sending merged file to client...');
+      res.download(mergedOut, `${title}.mp4`, (err) => {
+        // Clean up temp files
+        try {
+          if (fs.existsSync(videoTemp)) fs.unlinkSync(videoTemp);
+          if (fs.existsSync(audioTemp)) fs.unlinkSync(audioTemp);
+          if (fs.existsSync(mergedOut)) fs.unlinkSync(mergedOut);
+          console.log('Temporary files cleaned up successfully.');
+        } catch (cleanupErr) {
+          console.error('Failed to clean up temp files:', cleanupErr.message);
+        }
       });
+
     } else if (platform === 'instagram') {
       res.redirect(url);
     } else {
