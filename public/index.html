@@ -28,6 +28,12 @@
               <span class="label">Microsoft Rewards</span>
             </button>
           </li>
+          <li>
+            <button class="nav-btn" id="nav-downloader">
+              <span class="icon">📥</span>
+              <span class="label">Video Downloader</span>
+            </button>
+          </li>
         </ul>
       </nav>
       <div class="sidebar-footer">
@@ -127,6 +133,57 @@
             </div>
           </section>
         </div>
+      </div>
+
+      <!-- Downloader View (Hidden by default) -->
+      <div class="downloader-view hidden" id="downloader-content">
+        <section class="downloader-panel glass">
+          <h2 class="section-title">Download Videos</h2>
+          
+          <!-- Platform switcher tabs -->
+          <div class="downloader-tabs">
+            <button class="tab-btn active" id="tab-yt" data-platform="youtube">
+              <span class="tab-icon">🎥</span> YouTube
+            </button>
+            <button class="tab-btn" id="tab-ig" data-platform="instagram">
+              <span class="tab-icon">📸</span> Instagram
+            </button>
+          </div>
+
+          <!-- Input Group -->
+          <div class="input-group">
+            <input type="text" id="video-url" class="input-field" placeholder="Paste YouTube link here..." />
+            <button class="btn btn-primary" id="btn-analyze">
+              <span class="btn-text">Analyze Link</span>
+            </button>
+          </div>
+
+          <div class="downloader-status" id="dl-status"></div>
+
+          <!-- Result Container (Hidden until analyzed) -->
+          <div class="analysis-result hidden" id="analysis-container">
+            <div class="video-preview">
+              <img id="video-thumb" src="" alt="Thumbnail" />
+              <div class="video-info">
+                <h3 id="video-title" class="video-title-text">Video Title</h3>
+                <span id="video-duration" class="video-duration-text">Duration: --</span>
+              </div>
+            </div>
+
+            <div class="download-controls">
+              <div class="select-wrapper">
+                <label for="quality-select">Select Format & Quality:</label>
+                <select id="quality-select" class="dropdown-field">
+                  <!-- Formats populated dynamically -->
+                </select>
+              </div>
+              <button class="btn btn-success" id="btn-download">
+                <span class="btn-icon">⬇️</span>
+                <span class="btn-text">Download Video</span>
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
     </main>
   </div>

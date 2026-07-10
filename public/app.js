@@ -1,7 +1,13 @@
 // Dashboard Frontend Controller
 
 document.addEventListener('DOMContentLoaded', () => {
-  // DOM Elements
+  // DOM Elements - General
+  const navMsRewards = document.getElementById('nav-ms-rewards');
+  const navDownloader = document.getElementById('nav-downloader');
+  const dashboardContent = document.getElementById('dashboard-content');
+  const downloaderContent = document.getElementById('downloader-content');
+
+  // DOM Elements - MS Rewards
   const btnRefresh = document.getElementById('btn-refresh-status');
   const btnStart = document.getElementById('btn-start-assistant');
   const btnClearConsole = document.getElementById('btn-clear-console');
@@ -13,9 +19,138 @@ document.addEventListener('DOMContentLoaded', () => {
   
   const consoleOutput = document.getElementById('console-output');
   const tasksList = document.getElementById('tasks-list');
-  const navMsRewards = document.getElementById('nav-ms-rewards');
 
-  // Helper: Log to console panel
+  // DOM Elements - Downloader
+  const tabYt = document.getElementById('tab-yt');
+  const tabIg = document.getElementById('tab-ig');
+  const inputUrl = document.getElementById('video-url');
+  const btnAnalyze = document.getElementById('btn-analyze');
+  const dlStatus = document.getElementById('dl-status');
+  const analysisContainer = document.getElementById('analysis-container');
+  const videoThumb = document.getElementById('video-thumb');
+  const videoTitle = document.getElementById('video-title');
+  const videoDuration = document.getElementById('video-duration');
+  const qualitySelect = document.getElementById('quality-select');
+  const btnDownload = document.getElementById('btn-download');
+
+  // State Variables
+  let currentPlatform = 'youtube';
+  let analyzedUrl = '';
+  let analyzedData = null;
+
+  // View Switcher Logic
+  navMsRewards.addEventListener('click', () => {
+    navMsRewards.classList.add('active');
+    navDownloader.classList.remove('active');
+    dashboardContent.classList.remove('hidden');
+    downloaderContent.classList.add('hidden');
+    fetchStatus();
+  });
+
+  navDownloader.addEventListener('click', () => {
+    navDownloader.classList.add('active');
+    navMsRewards.classList.remove('active');
+    downloaderContent.classList.remove('hidden');
+    dashboardContent.classList.add('hidden');
+  });
+
+  // Downloader Tab Switcher
+  tabYt.addEventListener('click', () => {
+    currentPlatform = 'youtube';
+    tabYt.classList.add('active');
+    tabIg.classList.remove('active');
+    inputUrl.placeholder = 'Paste YouTube link here...';
+    analysisContainer.classList.add('hidden');
+    dlStatus.innerText = '';
+    inputUrl.value = '';
+  });
+
+  tabIg.addEventListener('click', () => {
+    currentPlatform = 'instagram';
+    tabIg.classList.add('active');
+    tabYt.classList.remove('active');
+    inputUrl.placeholder = 'Paste Instagram Reels link here...';
+    analysisContainer.classList.add('hidden');
+    dlStatus.innerText = '';
+    inputUrl.value = '';
+  });
+
+  // Downloader Analysis Logic
+  btnAnalyze.addEventListener('click', async () => {
+    const url = inputUrl.value.trim();
+    if (!url) {
+      dlStatus.innerText = 'Please paste a valid video URL.';
+      dlStatus.className = 'downloader-status error';
+      return;
+    }
+
+    dlStatus.innerText = 'Analyzing video link... (Instagram may take up to 10 seconds)';
+    dlStatus.className = 'downloader-status';
+    analysisContainer.classList.add('hidden');
+    btnAnalyze.disabled = true;
+
+    try {
+      const response = await fetch('/api/downloader/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: currentPlatform, url })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Server failed to analyze URL');
+      }
+
+      const data = await response.json();
+      analyzedData = data;
+      analyzedUrl = url;
+
+      // Populate elements
+      videoThumb.src = data.thumbnail;
+      videoTitle.innerText = data.title;
+      videoDuration.innerText = `Duration: ${data.duration}`;
+
+      // Populate qualities select
+      qualitySelect.innerHTML = '';
+      data.formats.forEach(f => {
+        const option = document.createElement('option');
+        if (currentPlatform === 'youtube') {
+          option.value = f.itag;
+          option.innerText = `${f.quality} - ${f.container.toUpperCase()} (${f.mimeType})`;
+        } else {
+          // Instagram: value is direct CDN URL
+          option.value = f.url;
+          option.innerText = f.quality;
+        }
+        qualitySelect.appendChild(option);
+      });
+
+      analysisContainer.classList.remove('hidden');
+      dlStatus.innerText = 'Analysis completed successfully!';
+      dlStatus.className = 'downloader-status success';
+    } catch (error) {
+      dlStatus.innerText = `Error: ${error.message}`;
+      dlStatus.className = 'downloader-status error';
+    } finally {
+      btnAnalyze.disabled = false;
+    }
+  });
+
+  // Downloader Download Trigger
+  btnDownload.addEventListener('click', () => {
+    const selectedVal = qualitySelect.value;
+    if (!selectedVal) return;
+
+    if (currentPlatform === 'youtube') {
+      // Direct browser redirect download stream
+      window.location.href = `/api/downloader/download?platform=youtube&url=${encodeURIComponent(analyzedUrl)}&itag=${selectedVal}`;
+    } else {
+      // Direct redirect to Instagram video resource
+      window.location.href = `/api/downloader/download?platform=instagram&url=${encodeURIComponent(selectedVal)}`;
+    }
+  });
+
+  // MS Rewards helper: Log to console panel
   function logToConsole(message, type = '') {
     const line = document.createElement('div');
     line.className = `console-line ${type}`;
@@ -32,7 +167,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Action: Get dashboard status
   async function fetchStatus() {
-    // Disable control buttons
     btnRefresh.disabled = true;
     btnStart.disabled = true;
     
@@ -52,19 +186,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       
-      // Update Overview Cards
       pointsVal.innerText = data.points !== null ? data.points.toLocaleString() : '---';
       streakVal.innerText = data.streak !== undefined ? `${data.streak} Days` : '0 Days';
       
       if (data.searchProgress) {
         searchVal.innerText = `${data.searchProgress.current}/${data.searchProgress.limit}`;
       } else {
-        searchVal.innerText = '30/30'; // fallback standard limit
+        searchVal.innerText = '30/30';
       }
       
       activitiesVal.innerText = data.activities ? data.activities.length : '0';
 
-      // Render Activities Checklists
       tasksList.innerHTML = '';
       if (data.activities && data.activities.length > 0) {
         data.activities.forEach(task => {
@@ -90,7 +222,6 @@ document.addEventListener('DOMContentLoaded', () => {
       logToConsole(`❌ Error fetching dashboard data: ${err.message}`, 'error');
       logToConsole('Make sure Edge is not locked by another running task and try refreshing.', 'error');
     } finally {
-      // Re-enable control buttons
       btnRefresh.disabled = false;
       btnStart.disabled = false;
     }
@@ -98,14 +229,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Action: Start Daily Assistant Run
   function startAssistant() {
-    // Disable control buttons
     btnRefresh.disabled = true;
     btnStart.disabled = true;
 
     logToConsole('Starting Microsoft Rewards Assistant run...', 'system');
     logToConsole('An Edge browser window will open on your screen shortly to perform searches...', 'system');
 
-    // Create EventSource stream
     const eventSource = new EventSource('/api/start');
 
     eventSource.onmessage = (event) => {
@@ -117,11 +246,9 @@ document.addEventListener('DOMContentLoaded', () => {
         logToConsole(line.replace('[FINISHED]', ''), 'success');
         eventSource.close();
         
-        // Auto-refresh stats once finished
         logToConsole('Execution completed. Refreshing points balance...', 'system');
         fetchStatus();
       } else {
-        // Standard logs
         if (line.includes('Points INCREASED')) {
           logToConsole(line, 'success');
         } else if (line.includes('Error')) {
@@ -143,7 +270,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Bind Listeners
   btnRefresh.addEventListener('click', fetchStatus);
   btnStart.addEventListener('click', startAssistant);
-  navMsRewards.addEventListener('click', fetchStatus);
 
   // Auto-fetch status on initial load
   fetchStatus();

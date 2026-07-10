@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import { chromium } from 'playwright';
 import path from 'path';
 import fs from 'fs';
+import ytdl from '@distube/ytdl-core';
 import { getDashboardStatus } from './dashboard.js';
 
 const app = express();
@@ -79,6 +80,118 @@ app.get('/api/start', (req, res) => {
     console.log('Client closed connection. Killing runner process...');
     child.kill();
   });
+});
+
+// API: Downloader - Analyze URL
+app.post('/api/downloader/analyze', async (req, res) => {
+  const { platform, url } = req.body;
+  console.log(`API Request: /api/downloader/analyze (Platform: ${platform})`);
+
+  try {
+    if (platform === 'youtube') {
+      const info = await ytdl.getInfo(url);
+      
+      // Filter formats that have both audio and video (muxed stream) for direct downloading without ffmpeg
+      const formats = ytdl.filterFormats(info.formats, 'audioandvideo').map(f => ({
+        quality: f.qualityLabel || 'Default',
+        itag: f.itag,
+        mimeType: f.mimeType.split(';')[0],
+        container: f.container
+      }));
+
+      if (formats.length === 0) {
+        // Fallback to video-only if no audioandvideo formats are found
+        const videoOnly = info.formats.filter(f => f.hasVideo).map(f => ({
+          quality: f.qualityLabel || 'Default (Video Only)',
+          itag: f.itag,
+          mimeType: f.mimeType.split(';')[0],
+          container: f.container
+        }));
+        formats.push(...videoOnly);
+      }
+
+      const durationSec = parseInt(info.videoDetails.lengthSeconds, 10);
+      const minutes = Math.floor(durationSec / 60);
+      const seconds = durationSec % 60;
+
+      res.json({
+        title: info.videoDetails.title,
+        thumbnail: info.videoDetails.thumbnails[0]?.url,
+        duration: `${minutes}m ${seconds}s`,
+        formats
+      });
+    } else if (platform === 'instagram') {
+      // Use Playwright to load page and extract video URL dynamically
+      console.log('Launching browser to scrape Instagram reel...');
+      const browser = await chromium.launch({ headless: true });
+      const page = await browser.newPage();
+      
+      try {
+        await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+        
+        // Wait for video tag
+        await page.waitForSelector('video', { timeout: 10000 });
+        
+        const data = await page.evaluate(() => {
+          const video = document.querySelector('video');
+          const poster = video ? video.getAttribute('poster') : null;
+          return {
+            src: video ? video.src : null,
+            poster
+          };
+        });
+
+        await browser.close();
+
+        if (!data.src) {
+          throw new Error('Video source URL could not be found.');
+        }
+
+        res.json({
+          title: 'Instagram Reels Video',
+          thumbnail: data.poster || 'https://instagram-brand.com/wp-content/uploads/2016/11/Instagram_AppIcon_Aug2017.png',
+          duration: 'N/A',
+          formats: [
+            { quality: 'Default HD', itag: 'ig-video', url: data.src }
+          ]
+        });
+      } catch (err) {
+        if (browser) await browser.close();
+        throw err;
+      }
+    } else {
+      res.status(400).json({ error: 'Unsupported platform' });
+    }
+  } catch (error) {
+    console.error('Downloader analysis failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Downloader - Download Stream / Redirect
+app.get('/api/downloader/download', async (req, res) => {
+  const { platform, url, itag } = req.query;
+  console.log(`API Request: /api/downloader/download (Platform: ${platform})`);
+
+  try {
+    if (platform === 'youtube') {
+      const info = await ytdl.getInfo(url);
+      const title = info.videoDetails.title.replace(/[^a-zA-Z0-9]/g, '_');
+      
+      res.setHeader('Content-Disposition', `attachment; filename="${title}.mp4"`);
+      res.setHeader('Content-Type', 'video/mp4');
+      
+      ytdl(url, { format: itag }).pipe(res);
+    } else if (platform === 'instagram') {
+      // Direct redirect to Instagram CDN so the client downloads directly from source
+      res.redirect(url);
+    } else {
+      res.status(400).send('Unsupported platform');
+    }
+  } catch (error) {
+    console.error('Download trigger failed:', error.message);
+    res.status(500).send(`Download failed: ${error.message}`);
+  }
 });
 
 app.listen(port, () => {
