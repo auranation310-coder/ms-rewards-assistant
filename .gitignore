@@ -15,3 +15,6 @@ verify_result.json
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Temporary files
+*-player-script.js
