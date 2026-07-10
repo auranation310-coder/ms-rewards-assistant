@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import { chromium } from 'playwright';
 import path from 'path';
 import fs from 'fs';
+import * as cheerio from 'cheerio';
 import { getDashboardStatus } from './dashboard.js';
 
 const app = express();
@@ -369,60 +370,59 @@ app.get('/api/downloader/file', (req, res) => {
 
 // API: Loot - Fetch Telegram channel updates
 app.get('/api/loot/updates', async (req, res) => {
-  console.log('API Request: /api/loot/updates');
-  let browser;
+  console.log('API Request: /api/loot/updates (Native fetch + Cheerio)');
   try {
-    browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    
-    // Set custom user-agent to ensure Telegram serves web preview correctly
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
-    await page.goto('https://t.me/s/subho9239', { waitUntil: 'networkidle', timeout: 30000 });
-    
-    const messages = await page.evaluate(() => {
-      const msgElements = document.querySelectorAll('.tgme_widget_message');
-      const results = [];
-      
-      msgElements.forEach(el => {
-        const textEl = el.querySelector('.tgme_widget_message_text');
-        const dateEl = el.querySelector('.tgme_widget_message_date time');
-        const photoEl = el.querySelector('.tgme_widget_message_photo_wrap');
-        const linkEl = el.querySelector('.tgme_widget_message_date');
-        
-        let imageUrl = '';
-        if (photoEl) {
-          const style = photoEl.getAttribute('style') || '';
-          const match = /url\(['"]?(.+?)['"]?\)/.exec(style);
-          if (match) {
-            imageUrl = match[1];
-          }
-        }
-        
-        let postLink = '';
-        if (linkEl) {
-          postLink = linkEl.getAttribute('href') || '';
-        }
-        
-        if (textEl) {
-          results.push({
-            text: textEl.innerHTML,
-            date: dateEl ? dateEl.innerText : 'Recent',
-            datetime: dateEl ? dateEl.getAttribute('datetime') : null,
-            image: imageUrl,
-            link: postLink
-          });
-        }
-      });
-      
-      // Return latest 15 posts, newest first
-      return results.slice(-15).reverse();
+    const response = await fetch('https://t.me/s/subho9239', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
     });
     
-    await browser.close();
-    res.json({ messages });
+    if (!response.ok) {
+      throw new Error(`Telegram returned status ${response.status}`);
+    }
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    
+    const messages = [];
+
+    $('.tgme_widget_message').each((i, el) => {
+      const textEl = $(el).find('.tgme_widget_message_text');
+      const dateEl = $(el).find('.tgme_widget_message_date time');
+      const photoEl = $(el).find('.tgme_widget_message_photo_wrap');
+      const linkEl = $(el).find('.tgme_widget_message_date');
+      
+      let imageUrl = '';
+      if (photoEl.length > 0) {
+        const style = photoEl.attr('style') || '';
+        const match = /url\(['"]?(.+?)['"]?\)/.exec(style);
+        if (match) {
+          imageUrl = match[1];
+        }
+      }
+
+      let postLink = '';
+      if (linkEl.length > 0) {
+        postLink = linkEl.attr('href') || '';
+      }
+
+      if (textEl.length > 0) {
+        messages.push({
+          text: textEl.html(), // Keep HTML formatting
+          date: dateEl.text() || 'Recent',
+          datetime: dateEl.attr('datetime') || null,
+          image: imageUrl,
+          link: postLink
+        });
+      }
+    });
+
+    // Return latest 15 posts, newest first
+    const latestMessages = messages.slice(-15).reverse();
+
+    res.json({ messages: latestMessages });
   } catch (error) {
-    if (browser) await browser.close();
     console.error('Loot updates fetch failed:', error.message);
     res.status(500).json({ error: error.message });
   }
