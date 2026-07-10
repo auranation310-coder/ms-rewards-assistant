@@ -94,17 +94,25 @@ app.post('/api/downloader/analyze', async (req, res) => {
       // Grab all formats that contain video
       const videoFormats = info.formats.filter(f => f.hasVideo);
 
+      const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
+      const audioSize = audioFormat ? parseInt(audioFormat.contentLength || 0, 10) : 0;
+
       const formats = videoFormats.map(f => {
         const resolution = f.qualityLabel || 'Default';
         const hasAudio = f.hasAudio;
         const container = f.container || 'mp4';
         
+        // Calculate total size: video + audio (if separate)
+        const videoSize = parseInt(f.contentLength || 0, 10);
+        const totalSize = hasAudio ? videoSize : (videoSize > 0 ? videoSize + audioSize : 0);
+
         return {
           quality: `${resolution} ${hasAudio ? '(With Sound)' : '(HD - Audio Merged)'}`,
           itag: f.itag,
           mimeType: f.mimeType.split(';')[0],
           container,
-          resolution: f.height || 0
+          resolution: f.height || 0,
+          sizeBytes: totalSize
         };
       });
 

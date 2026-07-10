@@ -126,6 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       analysisContainer.classList.remove('hidden');
+      updateSelectedSize(); // Show initial size selection
       dlStatus.innerText = 'Analysis completed successfully!';
       dlStatus.className = 'downloader-status success';
     } catch (error) {
@@ -135,6 +136,38 @@ document.addEventListener('DOMContentLoaded', () => {
       btnAnalyze.disabled = false;
     }
   });
+
+  // Helper: Format bytes to human-readable string
+  function formatBytes(bytes) {
+    if (bytes === 0 || !bytes) return 'Unknown Size';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  // Helper: Update duration and size text based on selected option
+  function updateSelectedSize() {
+    if (!analyzedData) return;
+    
+    if (currentPlatform === 'instagram') {
+      videoDuration.innerText = `Duration: N/A | Size: Variable`;
+      return;
+    }
+
+    const selectedItag = qualitySelect.value;
+    const selectedFormat = analyzedData.formats.find(f => f.itag == selectedItag);
+    
+    if (selectedFormat && selectedFormat.sizeBytes) {
+      const sizeStr = formatBytes(selectedFormat.sizeBytes);
+      videoDuration.innerText = `Duration: ${analyzedData.duration} | Size: ${sizeStr}`;
+    } else {
+      videoDuration.innerText = `Duration: ${analyzedData.duration} | Size: Unknown`;
+    }
+  }
+
+  // Listen for dropdown changes to update size indicator dynamically
+  qualitySelect.addEventListener('change', updateSelectedSize);
 
   // Downloader Download Trigger
   btnDownload.addEventListener('click', () => {
