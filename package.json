@@ -10,9 +10,11 @@
     "dry-run": "node src/index.js --dry-run",
     "start-visible": "node src/index.js --visible",
     "telegram-bot": "node src/bot.js",
-    "verify": "node src/self-correct.js"
+    "verify": "node src/self-correct.js",
+    "dashboard": "node src/server.js"
   },
   "dependencies": {
+    "express": "^5.2.1",
     "playwright": "^1.49.1"
   }
 }

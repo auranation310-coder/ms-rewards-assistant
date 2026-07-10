@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Local Web Dashboard for Microsoft Rewards Assistant">
+  <title>Microsoft Rewards Assistant Dashboard</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="app-container" id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="logo-icon">🤖</div>
+        <span class="brand-text">Rewards Bot</span>
+      </div>
+      <nav class="sidebar-nav">
+        <ul>
+          <li>
+            <button class="nav-btn active" id="nav-ms-rewards">
+              <span class="icon">Ⓜ️</span>
+              <span class="label">Microsoft Rewards</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="version-label">v1.0.0</span>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Top Header -->
+      <header class="app-header">
+        <h1 class="header-title">Microsoft Rewards Assistant</h1>
+        <div class="status-indicator">
+          <span class="status-dot green"></span>
+          <span class="status-text">Connected</span>
+        </div>
+      </header>
+
+      <!-- Dashboard View -->
+      <div class="dashboard-view" id="dashboard-content">
+        <!-- Overview Grid -->
+        <section class="overview-grid">
+          <!-- Card: Points -->
+          <div class="metric-card glass glow-blue" id="card-points">
+            <div class="card-header">
+              <h3 class="card-title">Current Balance</h3>
+              <span class="card-icon">💰</span>
+            </div>
+            <div class="card-value" id="points-val">---</div>
+            <div class="card-subtext">glowing rewards balance</div>
+          </div>
+
+          <!-- Card: Streak -->
+          <div class="metric-card glass glow-orange" id="card-streak">
+            <div class="card-header">
+              <h3 class="card-title">Daily Streak</h3>
+              <span class="card-icon">🔥</span>
+            </div>
+            <div class="card-value" id="streak-val">---</div>
+            <div class="card-subtext">active streak days</div>
+          </div>
+
+          <!-- Card: Search Progress -->
+          <div class="metric-card glass glow-purple" id="card-search">
+            <div class="card-header">
+              <h3 class="card-title">PC Search Progress</h3>
+              <span class="card-icon">🔍</span>
+            </div>
+            <div class="card-value" id="search-val">---</div>
+            <div class="card-subtext">daily search point ratio</div>
+          </div>
+
+          <!-- Card: Activities -->
+          <div class="metric-card glass glow-green" id="card-activities">
+            <div class="card-header">
+              <h3 class="card-title">Available Tasks</h3>
+              <span class="card-icon">✅</span>
+            </div>
+            <div class="card-value" id="activities-val">---</div>
+            <div class="card-subtext">promos and daily set</div>
+          </div>
+        </section>
+
+        <!-- Actions Panel & Tasks -->
+        <div class="detail-split">
+          <!-- Left: Actions & Live Console -->
+          <section class="actions-section glass">
+            <h2 class="section-title">Control Panel</h2>
+            <div class="control-box">
+              <button class="btn btn-primary" id="btn-start-assistant">
+                <span class="btn-icon">⚡</span>
+                <span class="btn-text">Start Assistant</span>
+              </button>
+              <button class="btn btn-secondary" id="btn-refresh-status">
+                <span class="btn-icon">🔄</span>
+                <span class="btn-text">Refresh Data</span>
+              </button>
+            </div>
+
+            <!-- Console Log Panel -->
+            <div class="console-panel">
+              <div class="console-header">
+                <span class="console-title">Live Execution Console</span>
+                <button class="btn-clear" id="btn-clear-console">Clear</button>
+              </div>
+              <div class="console-body" id="console-output">
+                <div class="console-line system">Dashboard loaded. Click "Refresh Data" or "Start Assistant" to check status.</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Right: Available Tasks List -->
+          <section class="tasks-section glass">
+            <h2 class="section-title">Available Daily Activities</h2>
+            <div class="tasks-container" id="tasks-list">
+              <div class="empty-state">No dashboard data loaded. Click Refresh to scrape.</div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
