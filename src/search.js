@@ -101,7 +101,10 @@ async function searchLoop(page, queries, count) {
       await searchBox.click();
       await searchBox.fill('');
       await page.waitForTimeout(300);
-      await searchBox.fill(query);
+      await page.locator('#sb_form_q').click();
+      for (const char of query) {
+        await page.keyboard.type(char, { delay: Math.random() * 80 + 40 });
+      }
       await page.waitForTimeout(500);
       
       // Press Enter to trigger search
@@ -167,6 +170,7 @@ export async function runAllSearches(desktopCount = 35, mobileCount = 25, headle
   const desktopContext = await chromium.launchPersistentContext(userDataDir, {
     channel: 'msedge',
     headless: headless,
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0',
     ignoreDefaultArgs: ['--enable-automation'],
     args: ['--disable-blink-features=AutomationControlled']
   });

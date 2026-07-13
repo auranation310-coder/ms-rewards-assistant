@@ -16,9 +16,17 @@ export async function getDashboardStatus(context = null) {
   const page = await context.newPage();
   
   try {
-    console.log('Fetching Microsoft Rewards status...');
-    await page.goto('https://www.bing.com/rewards/panelflyout', { waitUntil: 'networkidle', timeout: 60000 });
-    await page.waitForTimeout(3000);
+    await page.goto('https://www.bing.com/rewards/panelflyout', { waitUntil: 'load', timeout: 30000 });
+    try {
+      await Promise.any([
+        page.waitForSelector('.points-value', { timeout: 10000 }),
+        page.waitForSelector('#balance', { timeout: 10000 }),
+        page.waitForSelector('a[href*="form="]', { timeout: 10000 }),
+        page.waitForSelector('a[href*="spotlight"]', { timeout: 10000 })
+      ]);
+    } catch (e) {
+      await page.waitForTimeout(2000);
+    }
 
     const url = page.url();
     if (url.includes('login.live.com') || url.includes('signup')) {

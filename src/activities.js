@@ -41,8 +41,14 @@ export async function completeActivities(context, activities) {
 
 async function solveQuiz(page, url) {
   try {
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
-    await page.waitForTimeout(3000);
+    await page.goto(url, { waitUntil: 'load', timeout: 30000 });
+    try {
+      await Promise.any([
+        page.waitForSelector('.rqHeader, #rqStartGame, .wk_chQuizTitle', { timeout: 10000 })
+      ]);
+    } catch (e) {
+      await page.waitForTimeout(2000);
+    }
 
     let questionNum = 1;
     let maxRetries = 10; // Avoid infinite loops
