@@ -87,8 +87,8 @@ async function main() {
   let searchReport = { desktopDone: 0, mobileDone: 0 };
   if (!noSearch) {
     try {
-      // Only run desktop searches (35 searches)
-      searchReport = await runAllSearches(35, 0, headless);
+      // Run both desktop (35) and mobile (25) searches
+      searchReport = await runAllSearches(35, 25, headless);
     } catch (err) {
       console.error('Error during searches:', err.message);
     }

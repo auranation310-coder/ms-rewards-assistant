@@ -145,9 +145,9 @@ async function searchLoop(page, queries, count) {
       console.error(`Error searching for "${query}":`, err.message);
     }
 
-    // Wait a random duration between 4 and 8 seconds to look human
-    const delay = Math.floor(Math.random() * 4000) + 4000;
-    console.log(`Waiting ${Math.round(delay/1000)} seconds before next search...`);
+    // Wait a random duration between 1.5 and 2.5 seconds to run faster
+    const delay = Math.floor(Math.random() * 1000) + 1500;
+    console.log(`Waiting ${(delay/1000).toFixed(1)} seconds before next search...`);
     await page.waitForTimeout(delay);
   }
 
