@@ -88,8 +88,8 @@ app.get('/api/start', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
-  // Spawn node src/index.js --visible (visible Edge browser window)
-  const child = spawn('node', ['src/index.js', '--visible'], {
+  // Spawn node src/index.js headlessly (silent background run)
+  const child = spawn('node', ['src/index.js'], {
     cwd: process.cwd()
   });
 

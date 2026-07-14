@@ -1,6 +1,7 @@
 import { getDashboardStatus } from './dashboard.js';
 import { completeActivities } from './activities.js';
 import { runAllSearches } from './search.js';
+import { completeQuests } from './quests.js';
 import { sendTelegramNotification } from './telegram.js';
 import { chromium } from 'playwright';
 import path from 'path';
@@ -96,8 +97,9 @@ async function main() {
     console.log('\nSkipping search loops.');
   }
 
-  // 4. Final Status Scrape
-  console.log('\n[Phase 4] Fetching final points balance...');
+  // 4. Complete Punch Cards / Quests
+  let completedQuests = [];
+  console.log('\n[Phase 4] Launching Edge to check Punch Cards / Quests...');
   const finalContext = await chromium.launchPersistentContext(userDataDir, {
     channel: 'msedge',
     headless: headless,
@@ -112,6 +114,14 @@ async function main() {
     });
   });
 
+  try {
+    completedQuests = await completeQuests(finalContext, headless);
+  } catch (err) {
+    console.error('Error during quest execution:', err.message);
+  }
+
+  // 5. Final Status Scrape
+  console.log('\n[Phase 5] Fetching final points balance...');
   let finalStatus;
   try {
     finalStatus = await getDashboardStatus(finalContext);
@@ -140,6 +150,13 @@ async function main() {
     completedTasks.forEach(task => console.log(` - ${task}`));
   } else {
     console.log(' - None');
+  }
+
+  console.log(`\nPunch Cards Completed (${completedQuests.length}):`);
+  if (completedQuests.length > 0) {
+    completedQuests.forEach(quest => console.log(` - ${quest}`));
+  } else {
+    console.log(' - None pending');
   }
 
   console.log(`\nSearches Completed:`);
@@ -172,9 +189,14 @@ async function main() {
         ? completedTasks.map(t => `• ${t}`).join('\n') 
         : `• None`,
       ``,
+      `🎁 *Punch Cards Completed (${completedQuests.length}):*`,
+      completedQuests.length > 0 
+        ? completedQuests.map(q => `• ${q}`).join('\n') 
+        : `• None pending`,
+      ``,
       `🔍 *Searches Completed:*`,
       `• Desktop searches: \`${searchReport.desktopDone}/35\``,
-      `• Mobile searches : \`${searchReport.mobileDone}/0\``,
+      `• Mobile searches : \`${searchReport.mobileDone}/25\``,
       ``,
       `🎯 *Goal Progress:*`,
       `• Target: ₹500 PVR Cinemas Gift Card`,
