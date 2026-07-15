@@ -123,7 +123,7 @@ async function searchLoop(context, queries, count, isMobile = false) {
       try {
         // Navigate to Bing homepage
         await page.goto('https://www.bing.com', { waitUntil: 'load', timeout: 30000 });
-        await page.waitForTimeout(1500);
+        await page.waitForTimeout(3000);
 
         if (lastPoints === null) {
           lastPoints = await getPointsFromSearchPage(page);
@@ -150,12 +150,12 @@ async function searchLoop(context, queries, count, isMobile = false) {
           page.keyboard.press('Enter')
         ]);
 
-        // Human scrolling simulation
-        await page.waitForTimeout(2000);
+        // Human scrolling simulation and wait for rewards points registration
+        await page.waitForTimeout(4000);
         await page.evaluate(() => {
           window.scrollBy(0, window.innerHeight * (Math.random() * 0.4 + 0.2));
         });
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(2000);
 
         // Verify points
         const currentPoints = await getPointsFromSearchPage(page);
