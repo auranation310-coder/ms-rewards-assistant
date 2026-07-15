@@ -23,34 +23,58 @@ const fallbackQueries = [
 async function fetchTrendingQueries() {
   const queries = [];
   try {
-    console.log('Fetching daily trending queries from Google Trends...');
-    const response = await fetch('https://trends.google.com/trends/trendingsearches/daily/rss?geo=IN');
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const text = await response.text();
-    
-    // Parse titles using regex (avoiding XML parse dependencies)
-    const matches = text.matchAll(/<title>(.*?)<\/title>/g);
-    for (const match of matches) {
-      const title = match[1].trim();
-      if (title && title !== 'Daily Trending Searches' && !title.includes('Google Trends') && !queries.includes(title)) {
-        // Decode HTML entities
-        const decoded = title
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'");
-        queries.push(decoded);
+    console.log('Fetching random search topics from Wikipedia API...');
+    const url = 'https://en.wikipedia.org/w/api.php?action=query&format=json&list=random&rnnamespace=0&rnlimit=60';
+    const response = await fetch(url);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.query && data.query.random) {
+        data.query.random.forEach(item => {
+          let title = item.title;
+          
+          // Clean parenthetical annotations: "Ian Irvine (writer)" -> "Ian Irvine"
+          title = title.replace(/\s*\(.*?\)\s*/g, '').trim();
+          
+          // Filter lists and special pages
+          const words = title.split(' ');
+          const isClean = !title.includes('List of') && 
+                          !title.includes('Category:') && 
+                          !title.includes('Template:') && 
+                          !title.includes('Wikipedia:') &&
+                          words.length >= 1 && 
+                          words.length <= 5;
+          
+          if (isClean && !queries.includes(title)) {
+            queries.push(title);
+          }
+        });
       }
     }
-    console.log(`Successfully fetched ${queries.length} trending queries.`);
-  } catch (error) {
-    console.warn('Could not fetch Google Trends RSS, using local fallback queries:', error.message);
+  } catch (err) {
+    console.warn('Wikipedia API fetch failed:', err.message);
   }
 
-  // Combine and shuffle queries
-  const finalPool = [...queries, ...fallbackQueries];
-  return finalPool.sort(() => Math.random() - 0.5);
+  // Prepend conversational search prefixes
+  const prefixes = [
+    '', '', '', // 30% no prefix
+    'what is ', 'who is ', 'about ', 'history of ', 'definition of ', 
+    'meaning of ', 'information on ', 'details about ', 'news on '
+  ];
+
+  const processedQueries = queries.map(q => {
+    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+    return `${prefix}${q}`.toLowerCase().trim();
+  });
+
+  console.log(`Generated ${processedQueries.length} unique natural search queries.`);
+
+  // If we didn't fetch enough, pad with shuffled fallbacks
+  if (processedQueries.length < 50) {
+    const shuffleFallbacks = [...fallbackQueries].sort(() => Math.random() - 0.5);
+    processedQueries.push(...shuffleFallbacks);
+  }
+
+  return processedQueries.sort(() => Math.random() - 0.5);
 }
 
 async function getPointsFromSearchPage(page) {
@@ -68,86 +92,120 @@ async function getPointsFromSearchPage(page) {
 async function searchLoop(context, queries, count, isMobile = false) {
   let successfulSearches = 0;
   let lastPoints = null;
+  let queryIndex = 0;
+  let consecutiveNoIncrease = 0; // Track consecutive search failures to detect cap limit
 
   for (let i = 0; i < count; i++) {
-    const query = queries[i % queries.length];
-    console.log(`Searching (${i + 1}/${count}): "${query}"`);
+    let pointsIncreasedForThisStep = false;
+    let retries = 0;
+    const maxRetriesPerStep = 3;
 
-    // Create a new browser tab for each search
-    const page = await context.newPage();
-    if (isMobile) {
-      await page.setViewportSize({ width: 390, height: 844 });
-    } else {
-      await page.setViewportSize({ width: 1366, height: 768 });
+    // Stop searching if we hit the daily cap (5 consecutive failed searches)
+    if (consecutiveNoIncrease >= 5) {
+      console.log(`\n[Limit Reached] Detected 5 consecutive searches with no point increase. Daily search limit is likely reached.`);
+      break;
     }
 
-    try {
-      // Navigate to Bing homepage
-      await page.goto('https://www.bing.com', { waitUntil: 'load', timeout: 30000 });
-      await page.waitForTimeout(1500);
+    while (retries < maxRetriesPerStep && !pointsIncreasedForThisStep) {
+      const query = queries[queryIndex % queries.length];
+      queryIndex++;
+      
+      console.log(`Searching (${i + 1}/${count}) [Try ${retries + 1}/${maxRetriesPerStep}]: "${query}"`);
 
-      // Check points update on the first search to establish starting baseline
-      if (i === 0) {
-        lastPoints = await getPointsFromSearchPage(page);
-        if (lastPoints !== null) {
-          console.log(`Starting Points Balance detected on Bing: ${lastPoints} pts`);
+      // Open a fresh tab for each search query
+      const page = await context.newPage();
+      if (isMobile) {
+        await page.setViewportSize({ width: 390, height: 844 });
+      } else {
+        await page.setViewportSize({ width: 1366, height: 768 });
+      }
+
+      try {
+        // Navigate to Bing homepage
+        await page.goto('https://www.bing.com', { waitUntil: 'load', timeout: 30000 });
+        await page.waitForTimeout(1500);
+
+        if (lastPoints === null) {
+          lastPoints = await getPointsFromSearchPage(page);
+          if (lastPoints !== null) {
+            console.log(`Starting Points Balance detected on Bing: ${lastPoints} pts`);
+          }
         }
-      }
 
-      // Find search box
-      const searchBox = page.locator('#sb_form_q');
-      await searchBox.waitFor({ state: 'visible', timeout: 10000 });
-      
-      // Focus, clear, and type the query manually
-      await searchBox.click();
-      await page.waitForTimeout(200);
-      
-      for (const char of query) {
-        await page.keyboard.type(char, { delay: Math.random() * 80 + 40 });
-      }
-      await page.waitForTimeout(400);
-      
-      // Press Enter to trigger search
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'load', timeout: 30000 }).catch(() => {}),
-        page.keyboard.press('Enter')
-      ]);
+        // Locate and click search box
+        const searchBox = page.locator('#sb_form_q');
+        await searchBox.waitFor({ state: 'visible', timeout: 10000 });
+        await searchBox.click();
+        await page.waitForTimeout(200);
+        
+        // Type the query manually with random character intervals
+        for (const char of query) {
+          await page.keyboard.type(char, { delay: Math.random() * 80 + 40 });
+        }
+        await page.waitForTimeout(400);
+        
+        // Execute search
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'load', timeout: 30000 }).catch(() => {}),
+          page.keyboard.press('Enter')
+        ]);
 
-      // Human scroll
-      await page.waitForTimeout(1500);
-      await page.evaluate(() => {
-        window.scrollBy(0, window.innerHeight * (Math.random() * 0.4 + 0.2));
-      });
-      await page.waitForTimeout(800);
+        // Human scrolling simulation
+        await page.waitForTimeout(2000);
+        await page.evaluate(() => {
+          window.scrollBy(0, window.innerHeight * (Math.random() * 0.4 + 0.2));
+        });
+        await page.waitForTimeout(1000);
 
-      successfulSearches++;
-
-      // Check points update
-      const currentPoints = await getPointsFromSearchPage(page);
-      if (currentPoints !== null) {
-        if (lastPoints !== null) {
-          const diff = currentPoints - lastPoints;
-          if (diff > 0) {
-            console.log(` -> Points INCREASED: ${currentPoints} pts (+${diff})`);
-            lastPoints = currentPoints;
+        // Verify points
+        const currentPoints = await getPointsFromSearchPage(page);
+        if (currentPoints !== null) {
+          if (lastPoints !== null) {
+            const diff = currentPoints - lastPoints;
+            if (diff > 0) {
+              console.log(` -> Points INCREASED: ${currentPoints} pts (+${diff})`);
+              lastPoints = currentPoints;
+              pointsIncreasedForThisStep = true;
+              consecutiveNoIncrease = 0; // Reset counter on success
+              successfulSearches++;
+            } else {
+              console.log(` -> Points remained at: ${currentPoints} pts (No increase)`);
+              retries++;
+            }
           } else {
-            console.log(` -> Points remained at: ${currentPoints} pts (No increase - limit may be reached or pending sync)`);
+            console.log(` -> Current Points: ${currentPoints} pts`);
+            lastPoints = currentPoints;
+            pointsIncreasedForThisStep = true; // Count first baseline query
+            successfulSearches++;
           }
         } else {
-          console.log(` -> Current Points: ${currentPoints} pts`);
-          lastPoints = currentPoints;
+          console.log(` -> Could not read points from page.`);
+          retries++;
         }
+      } catch (err) {
+        console.error(`Error searching:`, err.message);
+        retries++;
+      } finally {
+        // Close browser tab immediately
+        await page.close();
       }
-    } catch (err) {
-      console.error(`Error searching for "${query}":`, err.message);
-    } finally {
-      // Close the tab immediately
-      await page.close();
+
+      // If search failed to award points, wait out search cooldown before retry
+      if (!pointsIncreasedForThisStep && retries < maxRetriesPerStep) {
+        const retryDelay = 8000 + Math.random() * 4000; // 8 to 12 seconds cooldown buffer
+        console.log(`Waiting ${(retryDelay/1000).toFixed(1)} seconds cooldown before retry...`);
+        await new Promise(r => setTimeout(r, retryDelay));
+      }
     }
 
-    // Wait a random duration between 2 and 4 seconds before opening the next tab
-    const delay = Math.floor(Math.random() * 2000) + 2000;
-    console.log(`Waiting ${(delay/1000).toFixed(1)} seconds before next search...`);
+    if (!pointsIncreasedForThisStep) {
+      consecutiveNoIncrease++;
+      console.log(`[Warning] No points awarded for step ${i + 1}. Consecutive fails: ${consecutiveNoIncrease}`);
+    }
+
+    // Standard interval delay between successful search steps (6-9 seconds)
+    const delay = Math.floor(Math.random() * 3000) + 6000;
+    console.log(`Waiting ${(delay/1000).toFixed(1)} seconds before next search step...`);
     await new Promise(r => setTimeout(r, delay));
   }
 
