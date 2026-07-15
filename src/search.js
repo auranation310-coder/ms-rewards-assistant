@@ -148,7 +148,7 @@ async function searchLoop(context, queries, count, isMobile = false) {
     // Wait a random duration between 2 and 4 seconds before opening the next tab
     const delay = Math.floor(Math.random() * 2000) + 2000;
     console.log(`Waiting ${(delay/1000).toFixed(1)} seconds before next search...`);
-    await page.waitForTimeout(delay);
+    await new Promise(r => setTimeout(r, delay));
   }
 
   return successfulSearches;
