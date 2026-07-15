@@ -65,63 +65,60 @@ async function getPointsFromSearchPage(page) {
   }
 }
 
-async function searchLoop(page, queries, count) {
+async function searchLoop(context, queries, count, isMobile = false) {
   let successfulSearches = 0;
-  
-  // Navigate to Bing homepage first to establish referrer context
-  try {
-    console.log('Navigating to Bing homepage...');
-    await page.goto('https://www.bing.com', { waitUntil: 'load', timeout: 60000 });
-    await page.waitForTimeout(3000);
-  } catch (err) {
-    console.warn('Initial homepage load failed, will try direct search:', err.message);
-  }
+  let lastPoints = null;
 
-  // Get initial points from current page if any
-  let lastPoints = await getPointsFromSearchPage(page);
-  if (lastPoints !== null) {
-    console.log(`Starting Points Balance detected on Bing: ${lastPoints} pts`);
-  }
-  
   for (let i = 0; i < count; i++) {
     const query = queries[i % queries.length];
     console.log(`Searching (${i + 1}/${count}): "${query}"`);
 
+    // Create a new browser tab for each search
+    const page = await context.newPage();
+    if (isMobile) {
+      await page.setViewportSize({ width: 390, height: 844 });
+    } else {
+      await page.setViewportSize({ width: 1366, height: 768 });
+    }
+
     try {
+      // Navigate to Bing homepage
+      await page.goto('https://www.bing.com', { waitUntil: 'load', timeout: 30000 });
+      await page.waitForTimeout(1500);
+
+      // Check points update on the first search to establish starting baseline
+      if (i === 0) {
+        lastPoints = await getPointsFromSearchPage(page);
+        if (lastPoints !== null) {
+          console.log(`Starting Points Balance detected on Bing: ${lastPoints} pts`);
+        }
+      }
+
       // Find search box
       const searchBox = page.locator('#sb_form_q');
+      await searchBox.waitFor({ state: 'visible', timeout: 10000 });
       
-      // If search box is not found or not visible, go back to homepage
-      if (!(await searchBox.isVisible())) {
-        await page.goto('https://www.bing.com', { waitUntil: 'load', timeout: 60000 });
-        await page.waitForTimeout(2000);
-      }
-      
-      // Focus, clear, and type the query
+      // Focus, clear, and type the query manually
       await searchBox.click();
-      await searchBox.fill('');
-      await page.waitForTimeout(300);
-      await page.locator('#sb_form_q').click();
+      await page.waitForTimeout(200);
+      
       for (const char of query) {
         await page.keyboard.type(char, { delay: Math.random() * 80 + 40 });
       }
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(400);
       
       // Press Enter to trigger search
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'load', timeout: 60000 }).catch(() => {}),
+        page.waitForNavigation({ waitUntil: 'load', timeout: 30000 }).catch(() => {}),
         page.keyboard.press('Enter')
       ]);
 
-      // Random human-like scrolling behavior
-      await page.waitForTimeout(2000);
+      // Human scroll
+      await page.waitForTimeout(1500);
       await page.evaluate(() => {
-        window.scrollBy(0, window.innerHeight * (Math.random() * 0.5 + 0.2));
+        window.scrollBy(0, window.innerHeight * (Math.random() * 0.4 + 0.2));
       });
-      await page.waitForTimeout(1000);
-      await page.evaluate(() => {
-        window.scrollBy(0, -window.innerHeight * (Math.random() * 0.2));
-      });
+      await page.waitForTimeout(800);
 
       successfulSearches++;
 
@@ -143,10 +140,13 @@ async function searchLoop(page, queries, count) {
       }
     } catch (err) {
       console.error(`Error searching for "${query}":`, err.message);
+    } finally {
+      // Close the tab immediately
+      await page.close();
     }
 
-    // Wait a random duration between 1.5 and 2.5 seconds to run faster
-    const delay = Math.floor(Math.random() * 1000) + 1500;
+    // Wait a random duration between 2 and 4 seconds before opening the next tab
+    const delay = Math.floor(Math.random() * 2000) + 2000;
     console.log(`Waiting ${(delay/1000).toFixed(1)} seconds before next search...`);
     await page.waitForTimeout(delay);
   }
@@ -182,12 +182,8 @@ export async function runAllSearches(desktopCount = 35, mobileCount = 25, headle
     });
   });
   
-  const desktopPage = await desktopContext.newPage();
-  // Set window size
-  await desktopPage.setViewportSize({ width: 1366, height: 768 });
-  
   try {
-    desktopDone = await searchLoop(desktopPage, queries, desktopCount);
+    desktopDone = await searchLoop(desktopContext, queries, desktopCount, false);
   } finally {
     console.log('Closing Desktop session...');
     await desktopContext.close();
@@ -195,7 +191,6 @@ export async function runAllSearches(desktopCount = 35, mobileCount = 25, headle
 
   // 2. Run Mobile Searches
   console.log('\n[Phase 2] Launching Edge in Mobile Emulation Mode...');
-  // Launch with Mobile User Agent and viewport
   const mobileContext = await chromium.launchPersistentContext(userDataDir, {
     channel: 'msedge',
     headless: headless,
@@ -212,10 +207,8 @@ export async function runAllSearches(desktopCount = 35, mobileCount = 25, headle
     });
   });
 
-  const mobilePage = await mobileContext.newPage();
-
   try {
-    mobileDone = await searchLoop(mobilePage, queries.slice(desktopCount), mobileCount);
+    mobileDone = await searchLoop(mobileContext, queries.slice(desktopCount), mobileCount, true);
   } finally {
     console.log('Closing Mobile session...');
     await mobileContext.close();
