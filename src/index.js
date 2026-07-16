@@ -5,6 +5,7 @@ import { completeQuests } from './quests.js';
 import { sendTelegramNotification } from './telegram.js';
 import { chromium } from 'playwright';
 import path from 'path';
+import fs from 'fs';
 
 const userDataDir = path.resolve('./user_data');
 
@@ -14,7 +15,37 @@ async function main() {
   const noSearch = args.includes('--no-search');
   const noActivities = args.includes('--no-activities');
   const visible = args.includes('--visible');
+  const force = args.includes('--force');
   const headless = !visible;
+
+  const lastRunFile = path.resolve('./last_run.json');
+  const today = new Date().toLocaleDateString();
+
+  if (!force && !dryRun) {
+    if (fs.existsSync(lastRunFile)) {
+      try {
+        const state = JSON.parse(fs.readFileSync(lastRunFile, 'utf8'));
+        if (state.lastRunDate === today) {
+          console.log('========================================================');
+          console.log(`[Run Guard] Script has already executed today (${today}).`);
+          console.log('Exiting to prevent multiple runs. Use --force to bypass.');
+          console.log('========================================================');
+          process.exit(0);
+        }
+      } catch (e) {
+        console.warn('Failed to parse last_run.json:', e.message);
+      }
+    }
+  }
+
+  // Update last run date
+  if (!dryRun) {
+    try {
+      fs.writeFileSync(lastRunFile, JSON.stringify({ lastRunDate: today }, null, 2));
+    } catch (e) {
+      console.warn('Failed to write last_run.json:', e.message);
+    }
+  }
 
   console.log('========================================================');
   console.log('Microsoft Rewards Assistant - Execution Started');
