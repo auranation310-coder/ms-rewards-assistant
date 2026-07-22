@@ -6,8 +6,12 @@ import { sendTelegramNotification } from './telegram.js';
 import { chromium } from 'playwright';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 
-const userDataDir = path.resolve('./user_data');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '..');
+const userDataDir = path.resolve(rootDir, 'user_data');
 
 async function main() {
   const args = process.argv.slice(2);
@@ -18,8 +22,8 @@ async function main() {
   const force = args.includes('--force');
   const headless = !visible;
 
-  const lastRunFile = path.resolve('./last_run.json');
-  const today = new Date().toLocaleDateString();
+  const lastRunFile = path.resolve(rootDir, 'last_run.json');
+  const today = new Date().toISOString().split('T')[0];
 
   if (!force && !dryRun) {
     if (fs.existsSync(lastRunFile)) {
